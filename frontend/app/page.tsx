@@ -59,12 +59,25 @@ export default function Home() {
     carregarDados();
   }, []);
 
-  // 4. O MOTOR DE BUSCA: Filtra a lista original baseada no que foi digitado
-  // Usa formatarDescricao para comparar o texto já traduzido (não o JSON cru)
-  const licitacoesFiltradas = licitacoes.filter((licitacao) =>
-    licitacao.titulo.toLowerCase().includes(busca.toLowerCase()) ||
-    formatarDescricao(licitacao.descricao).toLowerCase().includes(busca.toLowerCase())
-  );
+  // 4. O MOTOR DE BUSCA: Busca inteligente por palavras-chave e proteção contra null
+  const termosBusca = busca.toLowerCase().trim().split(/\s+/); // Quebra a frase em palavras
+
+  const licitacoesFiltradas = licitacoes.filter((licitacao) => {
+    // Proteção: se o título ou descrição vier nulo do banco, não quebra a tela
+    const titulo = (licitacao.titulo || '').toLowerCase();
+    const descricao = formatarDescricao(licitacao.descricao || '').toLowerCase();
+    
+    // Junta tudo num textão só para facilitar a busca
+    const textoCompleto = `${titulo} ${descricao}`;
+
+    // Se a barra estiver vazia, mostra todos os editais
+    if (termosBusca.length === 1 && termosBusca[0] === '') {
+      return true;
+    }
+
+    // A Mágica: Verifica se TODAS as palavras digitadas existem em algum lugar do texto do edital
+    return termosBusca.every(termo => textoCompleto.includes(termo));
+  });
 
   return (
     <main className="min-h-screen bg-slate-50 p-8 font-sans">
@@ -102,7 +115,7 @@ export default function Home() {
                   <h2 className="text-xl font-bold text-blue-800 mb-3">{licitacao.titulo}</h2>
 
                   {/* ↓ formatarDescricao transforma o JSON em texto legível */}
-                  <p className="text-slate-600 mb-5 text-sm leading-relaxed">
+                  <p className="text-slate-600 mb-5 text-sm leading-relaxed whitespace-pre-wrap">
                     {formatarDescricao(licitacao.descricao)}
                   </p>
 
