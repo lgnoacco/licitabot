@@ -2,112 +2,91 @@ import os
 import requests
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from supabase import create_client
+from supabase import create_client, Client
 
-# 1. Carrega as senhas e conecta ao Supabase
+# 1. Carrega as configurações
 load_dotenv()
 url_supabase = os.environ.get("SUPABASE_URL")
-key_supabase = os.environ.get("SUPABASE_KEY")
-supabase = create_client(url_supabase, key_supabase)
+# Use a SERVICE_KEY para ter permissão de deletar e inserir sem restrições
+key_supabase = os.environ.get("SUPABASE_SERVICE_KEY") 
 
+if not url_supabase or not key_supabase:
+    print("❌ Erro: SUPABASE_URL ou SUPABASE_SERVICE_KEY não encontradas no .env")
+    exit()
 
-def fazer_faxina_no_banco(dias_de_validade=1):
-    print(f"\n🧹 Iniciando a faxina: procurando licitações com mais de {dias_de_validade} dia(s)...")
-    
-    # Calcula qual é a data limite de corte
+supabase: Client = create_client(url_supabase, key_supabase)
+
+def fazer_faxina_no_banco(dias_de_validade=2):
+    """ Apaga licitações antigas para não lotar o plano gratuito do Supabase """
+    print(f"\n🧹 Iniciando faxina: removendo editais com mais de {dias_de_validade} dias...")
     data_limite = (datetime.now() - timedelta(days=dias_de_validade)).isoformat()
     
     try:
-        # Pede ao Supabase para deletar tudo onde a data de criação ('created_at') for menor ('lt') que a data limite
         resposta = supabase.table("licitacoes").delete().lt("created_at", data_limite).execute()
-        
-        # O Supabase retorna os dados apagados, então podemos contar quantos foram
-        quantidade_apagada = len(resposta.data) if resposta.data else 0
-        print(f"✅ Faxina concluída! {quantidade_apagada} licitação(ões) antiga(s) apagada(s).")
-        
+        print(f"✅ Faxina concluída! {len(resposta.data)} itens removidos.")
     except Exception as e:
-        print(f"❌ Erro ao limpar o banco: {e}")
+        print(f"⚠️ Aviso na faxina: {e}")
 
 def garimpar_licitacoes():
-    print("Buscando licitações de Pregão Eletrônico no PNCP...")
-    print("Aguardando resposta do servidor (limite de 15 segundos)...")
+    print("\n🎯 Buscando novos editais no PNCP (Pregão Eletrônico)...")
+
+    hoje = datetime.now()
+    data_inicial = (hoje - timedelta(days=3)).strftime('%Y%m%d')
+    data_final = hoje.strftime('%Y%m%d')
 
     url_governo = (
-        "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
-        "?dataInicial=20260320&dataFinal=20260324"
+        f"https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
+        f"?dataInicial={data_inicial}&dataFinal={data_final}"
         "&codigoModalidadeContratacao=8&pagina=1"
     )
 
-    # Máscara de navegador
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "application/json",
     }
 
     try:
         resposta = requests.get(url_governo, headers=headers, timeout=15)
-
-        if resposta.status_code != 200:
-            print(f"\n⚠️ O servidor do governo falhou (Erro {resposta.status_code}).")
+        resposta.raise_for_status()
+        dados = resposta.json()
+        
+        licitacoes = dados.get("data", [])
+        if not licitacoes:
+            print("📭 Nenhuma licitação nova encontrada.")
             return
 
-        if not resposta.text.strip():
-            print("\n❌ O servidor retornou uma resposta vazia.")
-            return
+        print(f"📦 Processando {len(licitacoes)} editais...")
 
-        content_type = resposta.headers.get("Content-Type", "")
-        if "application/json" not in content_type:
-            print(f"\n❌ Resposta não é JSON. Content-Type recebido: {content_type}")
-            return
-
-        dados_brutos = resposta.json()
-
-        if "data" not in dados_brutos or len(dados_brutos["data"]) == 0:
-            print("\nNenhuma licitação encontrada para esses dias.")
-            return
-
-        licitacoes_encontradas = dados_brutos["data"]
-        quantidade = len(licitacoes_encontradas)
-        print(f"\n🎯 Sucesso! Encontrei {quantidade} licitações na página 1. Processando...")
-
-        # Lista vazia que vai guardar todas as licitações tratadas
         lote_para_salvar = []
 
-        # O LAÇO MÁGICO: Passa por cada licitação da lista do governo
-        for item in licitacoes_encontradas:
-            titulo = item.get("objetoCompra", "Sem título")
-            
-            # Limpa o dado individual
-            dado_limpo = {
-                "titulo": titulo,
-                "descricao": item.get("amparoLegal", "Sem descrição"),
+        for item in licitacoes:
+            # Mapeamento para o novo Schema do Banco de Dados
+            dado_tratado = {
+                "numero_controle": item.get("numeroControlePNCP"), # ID Único do governo
+                "titulo": item.get("objetoCompra", "Sem título")[:255],
+                "orgao": item.get("orgaoEntidade", {}).get("razaoSocial", "Não informado"),
                 "valor_estimado": item.get("valorTotalEstimado", 0.0),
-                "link_edital": item.get("linkSistemaOrigem", "Sem link"),
+                "link_edital": item.get("linkSistemaOrigem"),
+                "uf": item.get("unidadeOrgao", {}).get("ufSigla"),
+                "municipio": item.get("unidadeOrgao", {}).get("nomeUnidade"),
+                "texto_bruto": item.get("objetoCompra"), # Texto que a IA vai ler
+                "fonte": "pncp",
+                "status": "raw" # Essencial para disparar o Webhook da IA
             }
-            
-            # Adiciona na nossa lista de lote
-            lote_para_salvar.append(dado_limpo)
+            lote_para_salvar.append(dado_tratado)
 
-        # 4. Salva o LOTE INTEIRO no Supabase de uma vez só!
+        # Usamos UPSERT em vez de INSERT. 
+        # Se o numero_controle já existir, ele só atualiza (evita erro de duplicata)
         if lote_para_salvar:
-            supabase.table("licitacoes").insert(lote_para_salvar).execute()
-            print(f"✅ {len(lote_para_salvar)} licitações salvas no banco de dados com sucesso!")
+            supabase.table("licitacoes").upsert(lote_para_salvar, on_conflict="numero_controle").execute()
+            print(f"🚀 {len(lote_para_salvar)} licitações sincronizadas com sucesso!")
 
-    except requests.exceptions.Timeout:
-        print("\n❌ Demorou demais! O servidor do Governo está muito lento.")
     except Exception as e:
-        print(f"\n❌ Erro inesperado: {type(e).__name__}: {e}")
+        print(f"❌ Erro no garimpo: {e}")
 
 if __name__ == "__main__":
-    # 1. Faz a limpeza primeiro (apaga tudo que tem mais de 1 dia)
-    fazer_faxina_no_banco(dias_de_validade=1)
+    # 1. Limpa o que for muito velho (2 dias)
+    fazer_faxina_no_banco(dias_de_validade=2)
     
-    # 2. Depois busca as novas licitações
+    # 2. Busca as novas
     garimpar_licitacoes()
-
-    
-    
