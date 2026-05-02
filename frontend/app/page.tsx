@@ -49,7 +49,7 @@ export default function Home() {
       const { data, error } = await supabase
         .from('licitacoes')
         .select('*')
-        .order('id', { ascending: false });
+        .order('created_at', { ascending: false });
 
       if (data) {
         setLicitacoes(data);

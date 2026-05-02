@@ -36,7 +36,7 @@ const AnaliseEditalSchema = z.object({
   }),
 
   score_viabilidade: z.number().int().min(0).max(100),
-  justificativa_score: z.string().max(500),
+  justificativa_score: z.string().max(2000).describe("Justificativa da nota..."),
 });
 
 export type AnaliseEdital = z.infer<typeof AnaliseEditalSchema>;
