@@ -2,9 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '../src/supabase';
-// ─────────────────────────────────────────────────────────────────────────────
-// FUNÇÃO TRADUTORA
-// Recebe qualquer string. Se for um JSON do governo... 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FUNÇÃO TRADUTORA
@@ -121,7 +118,10 @@ export default function Home() {
                     <div className="flex items-center gap-2">
                       <span className="text-sm text-slate-500 font-medium">Valor Estimado:</span>
                       <span className="text-emerald-700 font-bold bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
-                        R$ {licitacao.valor_estimado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        {/* AQUI ESTÁ A CORREÇÃO ANTI-ERRO */}
+                        {licitacao.valor_estimado != null 
+                          ? `R$ ${licitacao.valor_estimado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` 
+                          : 'Valor não informado'}
                       </span>
                     </div>
 
