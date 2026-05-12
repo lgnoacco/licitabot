@@ -10,7 +10,7 @@ function formatarDescricao(texto: string): string {
 
   try {
     const obj = JSON.parse(texto);
-    if (typeof obj === 'object' && obj !== null) {
+      if (typeof obj === 'object' && obj !== null) {
       if (obj.texto_bruto && typeof obj.texto_bruto === 'string') return obj.texto_bruto;
       if (obj.descricao && typeof obj.descricao === 'string') return obj.descricao;
       if (obj.nome     && typeof obj.nome     === 'string') return obj.nome;

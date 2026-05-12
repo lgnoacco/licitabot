@@ -99,7 +99,7 @@ ${textoTruncado}`;
 
   // Configura o modelo (Gemini 2x'.5 Flash é o ideal para leitura de documentos rápido e barato)
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.5-flash", // olhar aqui quando der erro 
     systemInstruction: systemPrompt,
     generationConfig: {
       responseMimeType: "application/json", // Força a saída ser um JSON puro

@@ -89,4 +89,4 @@ if __name__ == "__main__":
     fazer_faxina_no_banco(dias_de_validade=2)
     
     # 2. Busca as novas
-    garimpar_licitacoes()
+    garimpar_licitacoes()   
