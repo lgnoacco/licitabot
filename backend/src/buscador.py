@@ -1,8 +1,10 @@
 import os
+from wsgiref import headers
 import requests
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from supabase import create_client, Client
+
 
 # 1. Carrega as configurações
 load_dotenv()
@@ -27,62 +29,56 @@ def fazer_faxina_no_banco(dias_de_validade=2):
     except Exception as e:
         print(f"⚠️ Aviso na faxina: {e}")
 
-def garimpar_licitacoes():
-    print("\n🎯 Buscando novos editais no PNCP (Pregão Eletrônico)...")
+def garimpar_licitacoes(max_paginas=5):
+    print("\n🎯 Buscando novos editais no PNCP...")
 
     hoje = datetime.now()
     data_inicial = (hoje - timedelta(days=3)).strftime('%Y%m%d')
     data_final = hoje.strftime('%Y%m%d')
 
-    url_governo = (
-        f"https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
-        f"?dataInicial={data_inicial}&dataFinal={data_final}"
-        "&codigoModalidadeContratacao=8&pagina=1"
-    )
+    total_salvo = 0
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-    }
+    for pagina in range(1, max_paginas + 1):
+        url_governo = (
+            f"https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
+            f"?dataInicial={data_inicial}&dataFinal={data_final}"
+            f"&codigoModalidadeContratacao=8&pagina={pagina}&tamanhoPagina=50"
+        )
 
-    try:
-        resposta = requests.get(url_governo, headers=headers, timeout=15)
-        resposta.raise_for_status()
-        dados = resposta.json()
-        
-        licitacoes = dados.get("data", [])
-        if not licitacoes:
-            print("📭 Nenhuma licitação nova encontrada.")
-            return
+        try:
+            resposta = requests.get(url_governo, headers=headers, timeout=15)
+            resposta.raise_for_status()
+            dados = resposta.json()
 
-        print(f"📦 Processando {len(licitacoes)} editais...")
+            licitacoes = dados.get("data", [])
+            if not licitacoes:
+                print(f"📭 Página {pagina} vazia, encerrando.")
+                break
 
-        lote_para_salvar = []
+            lote = []
+            for item in licitacoes:
+                lote.append({
+                    "numero_controle": item.get("numeroControlePNCP"),
+                    "titulo": item.get("objetoCompra", "Sem título")[:255],
+                    "orgao": item.get("orgaoEntidade", {}).get("razaoSocial", "Não informado"),
+                    "valor_estimado": item.get("valorTotalEstimado", 0.0),
+                    "link_edital": item.get("linkSistemaOrigem"),
+                    "uf": item.get("unidadeOrgao", {}).get("ufSigla"),
+                    "municipio": item.get("unidadeOrgao", {}).get("municipioNome"),  # ✅ corrigido
+                    "texto_bruto": item.get("objetoCompra"),
+                    "fonte": "pncp",
+                    "status": "raw"
+                })
 
-        for item in licitacoes:
-            # Mapeamento para o novo Schema do Banco de Dados
-            dado_tratado = {
-                "numero_controle": item.get("numeroControlePNCP"), # ID Único do governo
-                "titulo": item.get("objetoCompra", "Sem título")[:255],
-                "orgao": item.get("orgaoEntidade", {}).get("razaoSocial", "Não informado"),
-                "valor_estimado": item.get("valorTotalEstimado", 0.0),
-                "link_edital": item.get("linkSistemaOrigem"),
-                "uf": item.get("unidadeOrgao", {}).get("ufSigla"),
-                "municipio": item.get("unidadeOrgao", {}).get("nomeUnidade"),
-                "texto_bruto": item.get("objetoCompra"), # Texto que a IA vai ler
-                "fonte": "pncp",
-                "status": "raw" # Essencial para disparar o Webhook da IA
-            }
-            lote_para_salvar.append(dado_tratado)
+            supabase.table("licitacoes").upsert(lote, on_conflict="numero_controle").execute()
+            total_salvo += len(lote)
+            print(f"✅ Página {pagina}: {len(lote)} licitações salvas")
 
-        # Usamos UPSERT em vez de INSERT. 
-        # Se o numero_controle já existir, ele só atualiza (evita erro de duplicata)
-        if lote_para_salvar:
-            supabase.table("licitacoes").upsert(lote_para_salvar, on_conflict="numero_controle").execute()
-            print(f"🚀 {len(lote_para_salvar)} licitações sincronizadas com sucesso!")
+        except Exception as e:
+            print(f"❌ Erro na página {pagina}: {e}")
+            break
 
-    except Exception as e:
-        print(f"❌ Erro no garimpo: {e}")
+    print(f"\n🚀 Total sincronizado: {total_salvo} licitações")
 
 if __name__ == "__main__":
     # 1. Limpa o que for muito velho (2 dias)
